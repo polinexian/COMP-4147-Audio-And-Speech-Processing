@@ -1,0 +1,322 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "id": "intro_01",
+   "metadata": {},
+   "source": [
+    "# Lab 3: Audio Deepfake Detection (Part A) — Traditional Methods\n",
+    "## Program Code Template\n",
+    "\n",
+    "Welcome to Lab 3! In this assignment, we will explore how to detect AI-generated or spoofed audio (Deepfakes). Audio deepfakes often leave behind subtle acoustic artifacts that humans might not hear, but algorithms can detect.\n",
+    "\n",
+    "This lab is divided into two main parts:\n",
+    "1. **Traditional Machine Learning Pipeline (This Notebook):** Handcrafted acoustic feature extraction followed by standard ML classifiers.\n",
+    "2. **Learning-Based Detection (Next Section):** Deep learning approaches (e.g., CNNs/Transformers) operating directly on spectrograms or waveforms.\n",
+    "\n",
+    "**Instructions**\n",
+    "- Read and run the **Worked Examples** first. They show you exactly what the input and output look like.\n",
+    "- Cells marked `# TODO` require you to write code. Everything else is provided.\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "setup_02",
+   "metadata": {},
+   "source": [
+    "## Setup\n",
+    "Run the cell below to install and import the required packages."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "setup_03",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import numpy as np\n",
+    "import pandas as pd\n",
+    "import matplotlib.pyplot as plt\n",
+    "import librosa\n",
+    "import librosa.display\n",
+    "from IPython.display import Audio\n",
+    "\n",
+    "from sklearn.model_selection import train_test_split\n",
+    "from sklearn.svm import SVC\n",
+    "from sklearn.ensemble import RandomForestClassifier\n",
+    "from sklearn.metrics import accuracy_score, roc_curve\n",
+    "from sklearn.datasets import make_classification\n",
+    "\n",
+    "import warnings\n",
+    "warnings.filterwarnings('ignore')\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "example_intro_04",
+   "metadata": {},
+   "source": [
+    "## 1. Worked Example — Basic Feature Extraction & Classification\n",
+    "\n",
+    "In traditional audio classification, we cannot feed raw varying-length audio waves directly into models like SVMs. We must extract **fixed-length feature vectors**.\n",
+    "\n",
+    "Below, we simulate a 'Bona Fide' (Real) human voice and a 'Spoofed' (Fake) robotic voice using synthetic signals. We will extract basic MFCCs, take the average across all time frames, and use that as our feature."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "example_audio_05",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# WORKED EXAMPLE: Generating synthetic \"Real\" and \"Fake\" audio\n",
+    "sr = 16000\n",
+    "\n",
+    "# 1. Simulate \"Real\" audio: a smooth harmonic sweep\n",
+    "y_real = librosa.chirp(fmin=200, fmax=800, sr=sr, duration=1.0)\n",
+    "\n",
+    "# 2. Simulate \"Fake\" audio: similar sweep but with high-frequency artifacts and robotic noise\n",
+    "y_fake = librosa.chirp(fmin=200, fmax=800, sr=sr, duration=1.0)\n",
+    "noise = np.random.normal(0, 0.05, len(y_fake))\n",
+    "y_fake = y_fake + noise # Injecting artifacts\n",
+    "\n",
+    "print(\"Listen to 'Real' Audio:\")\n",
+    "display(Audio(data=y_real, rate=sr))\n",
+    "\n",
+    "print(\"Listen to 'Fake' Audio (Notice the noise/artifacts):\")\n",
+    "display(Audio(data=y_fake, rate=sr))\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "example_feature_06",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# WORKED EXAMPLE: Feature Extraction\n",
+    "def extract_basic_feature(y, sr):\n",
+    "    # Extract 20 MFCCs (shape: 20 x n_frames)\n",
+    "    mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=20)\n",
+    "    \n",
+    "    # Average across the time axis (axis=1) to get a fixed 1D array of size 20\n",
+    "    mfcc_mean = np.mean(mfccs, axis=1)\n",
+    "    return mfcc_mean\n",
+    "\n",
+    "feat_real = extract_basic_feature(y_real, sr)\n",
+    "feat_fake = extract_basic_feature(y_fake, sr)\n",
+    "\n",
+    "print(\"Extracted Feature Vector Shape:\", feat_real.shape)\n",
+    "print(\"Sample values (Real):\", np.round(feat_real[:5], 2))\n",
+    "print(\"Sample values (Fake):\", np.round(feat_fake[:5], 2))\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "example_train_07",
+   "metadata": {},
+   "source": [
+    "### Training a Baseline Classifier\n",
+    "Now we generate a simulated dataset of 1000 audio representations (500 real, 500 fake) based on our features to train a Support Vector Machine (SVM)."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "example_model_08",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# WORKED EXAMPLE: Training a Classifier\n",
+    "# We use sklearn to simulate a dataset representing extracted features\n",
+    "X_demo, y_demo = make_classification(n_samples=1000, n_features=20, n_informative=15, \n",
+    "                                     random_state=42, weights=[0.5, 0.5])\n",
+    "\n",
+    "# 0 = Fake/Spoof, 1 = Real/Bona Fide\n",
+    "X_train, X_test, y_train, y_test = train_test_split(X_demo, y_demo, test_size=0.3, random_state=42)\n",
+    "\n",
+    "svm_model = SVC(kernel='linear', probability=True)\n",
+    "svm_model.fit(X_train, y_train)\n",
+    "\n",
+    "y_pred = svm_model.predict(X_test)\n",
+    "accuracy = accuracy_score(y_test, y_pred)\n",
+    "\n",
+    "print(f\"Baseline SVM Accuracy: {accuracy * 100:.2f}%\")\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "tasks_intro_09",
+   "metadata": {},
+   "source": [
+    "---\n",
+    "# Student TODO Tasks\n",
+    "\n",
+    "The basic pipeline works, but Deepfake detection is highly challenging in the real world. To improve, we need **better features** and **domain-specific evaluation metrics**."
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "task1_intro_10",
+   "metadata": {},
+   "source": [
+    "## TODO 1: Advanced Feature Engineering (MFCC + Deltas + Stats)\n",
+    "Audio deepfakes often reveal themselves in *dynamic transitions* (how the sound changes over time). \n",
+    "\n",
+    "Your task is to write a function that computes `n_mfcc=24`.\n",
+    "Then, calculate the 1st derivative (Delta) and 2nd derivative (Delta-Delta).\n",
+    "Instead of just using the **mean** across time, compute both the **mean** and **standard deviation (std)** for MFCC, Delta, and Delta-Delta. Concatenate them all into a single, flat 1D NumPy array.\n",
+    "\n",
+    "*Hint: The final feature vector should have a length of $24 \\times 3 \\times 2 = 144$.*"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "task1_code_11",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def extract_advanced_feature(y, sr, n_mfcc=24):\n",
+    "    \"\"\"\n",
+    "    Extracts Mean and Std of MFCC, Delta, and Delta-Delta.\n",
+    "    \"\"\"\n",
+    "    # TODO 1.1: Extract MFCCs using librosa\n",
+    "    mfcc = None\n",
+    "    \n",
+    "    # TODO 1.2: Compute Delta and Delta-Delta using librosa.feature.delta\n",
+    "    delta = None\n",
+    "    delta2 = None\n",
+    "    \n",
+    "    # TODO 1.3: Compute mean and std for each across the time axis (axis=1)\n",
+    "    # e.g., mfcc_mean = np.mean(mfcc, axis=1)\n",
+    "    \n",
+    "    \n",
+    "    # TODO 1.4: Concatenate all 6 statistical arrays into one 1D array using np.hstack\n",
+    "    final_feature_vector = None\n",
+    "    \n",
+    "    return final_feature_vector\n",
+    "\n",
+    "# Test your function on the simulated y_real:\n",
+    "# test_feat = extract_advanced_feature(y_real, sr)\n",
+    "# print(\"Advanced Feature Shape:\", test_feat.shape) # Should be (144,)\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "task2_intro_12",
+   "metadata": {},
+   "source": [
+    "## TODO 2: The Equal Error Rate (EER) Metric\n",
+    "In deepfake detection, datasets are extremely unbalanced (e.g., 90% fake, 10% real). **Accuracy is misleading.** Instead, the ASVspoof challenge uses **Equal Error Rate (EER)**.\n",
+    "\n",
+    "EER is the point on the ROC curve where the False Positive Rate ($FPR$) equals the False Negative Rate ($FNR$).\n",
+    "Since $FNR = 1 - TPR$ (True Positive Rate), EER occurs where $FPR = 1 - TPR$.\n",
+    "\n",
+    "Write a function to compute EER using `sklearn.metrics.roc_curve`."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "task2_code_13",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def compute_eer(y_true, y_scores):\n",
+    "    \"\"\"\n",
+    "    Computes the Equal Error Rate (EER).\n",
+    "    \n",
+    "    Args:\n",
+    "        y_true: True binary labels (0 or 1)\n",
+    "        y_scores: Predicted probabilities or confidence scores for the positive class\n",
+    "    Returns:\n",
+    "        eer_value: The EER as a float percentage\n",
+    "    \"\"\"\n",
+    "    # TODO 2.1: Use roc_curve to get fpr, tpr, and thresholds\n",
+    "    fpr, tpr, thresholds = None, None, None\n",
+    "    \n",
+    "    # TODO 2.2: Calculate FNR (1 - tpr)\n",
+    "    fnr = None\n",
+    "    \n",
+    "    # TODO 2.3: Find the threshold index where the absolute difference between fpr and fnr is minimized\n",
+    "    # Hint: Use np.nanargmin(np.absolute(fnr - fpr))\n",
+    "    eer_threshold_idx = None\n",
+    "    \n",
+    "    # TODO 2.4: The EER is the FPR (or FNR) at that specific index\n",
+    "    eer_value = None\n",
+    "    \n",
+    "    return eer_value\n",
+    "\n",
+    "# Test your function with dummy data:\n",
+    "# dummy_y = np.array([1, 1, 0, 0, 1, 0])\n",
+    "# dummy_scores = np.array([0.9, 0.8, 0.4, 0.6, 0.7, 0.1])\n",
+    "# print(\"Test EER:\", compute_eer(dummy_y, dummy_scores))\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "task3_intro_14",
+   "metadata": {},
+   "source": [
+    "## TODO 3: Train and Evaluate the Best Traditional Baseline\n",
+    "Now, let's put it all together. We have generated a more complex tabular dataset `X_complex` representing our 144-dimensional advanced features.\n",
+    "\n",
+    "Your task:\n",
+    "1. Initialize a `RandomForestClassifier`.\n",
+    "2. Fit it on the training data.\n",
+    "3. Predict the **probabilities** of the test data (use `.predict_proba()[:, 1]`).\n",
+    "4. Calculate and print the EER using your `compute_eer` function. A lower EER is better!"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "id": "task3_code_15",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Generating a difficult, imbalanced mock dataset of advanced features\n",
+    "X_complex, y_complex = make_classification(n_samples=2000, n_features=144, n_informative=50, \n",
+    "                                           weights=[0.8, 0.2], random_state=42)\n",
+    "X_train_c, X_test_c, y_train_c, y_test_c = train_test_split(X_complex, y_complex, test_size=0.3, random_state=42)\n",
+    "\n",
+    "# TODO 3.1: Initialize a RandomForestClassifier (try setting n_estimators=100)\n",
+    "rf_model = None\n",
+    "\n",
+    "# TODO 3.2: Fit the model on (X_train_c, y_train_c)\n",
+    "\n",
+    "\n",
+    "# TODO 3.3: Get predicted probabilities for X_test_c\n",
+    "# Hint: my_model.predict_proba(X_test_c)[:, 1]\n",
+    "y_scores_rf = None\n",
+    "\n",
+    "# TODO 3.4: Compute and print the EER\n",
+    "rf_eer = None # call compute_eer(y_test_c, y_scores_rf)\n",
+    "# print(f\"Random Forest EER: {rf_eer:.4f}\")\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "transition_16",
+   "metadata": {},
+   "source": [
+    "---\n",
+    "# Next Steps: Learning-Based Detection\n",
+    "\n",
+    "Traditional feature engineering requires significant domain knowledge (like deciding between MFCCs or LFCCs) and throws away a lot of structural information when we average across time.\n",
+    "\n",
+    "In **Part B** of this lab, we will discard handcrafted feature arrays entirely and feed the raw spectrograms (as images) or audio waveforms directly into Deep Neural Networks (CNNs) to let the model *learn* the best features automatically."
+   ]
+  }
+ ],
+ "metadata": {
+  "language_info": {
+   "name": "python"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
